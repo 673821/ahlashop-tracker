@@ -2,9 +2,11 @@ import os, json
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
 import requests
 
 TOKEN   = os.environ.get("TELEGRAM_TOKEN", "CHANGE_MOI")
@@ -38,12 +40,15 @@ def scrape():
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--window-size=1920,1080")
-    driver = webdriver.Chrome(options=opts)
+    driver = webdriver.Chrome(
+        service=Service(ChromeDriverManager().install()),
+        options=opts
+    )
     products = []
     try:
         driver.get("https://ahlashop.net/shop/")
         WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "li.product, .elementor-widget-woocommerce-archive-products"))
+            EC.presence_of_element_located((By.CSS_SELECTOR, "li.product"))
         )
         items = driver.find_elements(By.CSS_SELECTOR, "li.product")
         for item in items:
@@ -59,7 +64,8 @@ def scrape():
                 except: orig = 0
                 disc = round((orig-curr)/orig*100) if orig>0 and curr>0 else 0
                 products.append({"id":slug,"name":name,"url":link,"curr":curr,"orig":orig,"disc":disc,"top":link in TOP_SELLER_URLS})
-            except: continue
+            except:
+                continue
     finally:
         driver.quit()
     return products
