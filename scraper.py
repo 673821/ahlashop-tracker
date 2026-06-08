@@ -1,26 +1,13 @@
-import os, json
+import os, json, requests
 from datetime import datetime
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
-import requests
 
 TOKEN   = os.environ.get("TELEGRAM_TOKEN", "CHANGE_MOI")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "7975203420")
 
-TOP_SELLER_URLS = [
-    "https://ahlashop.net/mkyf-hua/",
-    "https://ahlashop.net/inhalateur/",
-    "https://ahlashop.net/virtual-reality-glasses-2/",
-    "https://ahlashop.net/hzam-tdfya/",
-    "https://ahlashop.net/mruha-mhmula/",
-    "https://ahlashop.net/hafza-tbryd/",
-    "https://ahlashop.net/cofrefeure/",
-    "https://ahlashop.net/mnzm-almlabs/",
+TOP_SELLER_IDS = [
+    "mkyf-hua", "inhalateur", "virtual-reality-glasses-2",
+    "hzam-tdfya", "mruha-mhmula", "hafza-tbryd",
+    "cofrefeure", "mnzm-almlabs",
 ]
 KNOWN_FILE = "known_products.json"
 
@@ -35,45 +22,60 @@ def save_known(ids):
         json.dump(list(ids), f)
 
 def scrape():
-    opts = Options()
-    opts.add_argument("--headless")
-    opts.add_argument("--no-sandbox")
-    opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--window-size=1920,1080")
-    driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()),
-        options=opts
-    )
     products = []
-    try:
-        driver.get("https://ahlashop.net/shop/")
-        WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "li.product"))
-        )
-        items = driver.find_elements(By.CSS_SELECTOR, "li.product")
-        for item in items:
-            try:
-                name = item.find_element(By.CSS_SELECTOR, ".woocommerce-loop-product__title, h2").text.strip()
-                link = item.find_element(By.CSS_SELECTOR, "a").get_attribute("href")
-                slug = link.rstrip("/").split("/")[-1]
-                try:
-                    curr = float(item.find_element(By.CSS_SELECTOR, "ins .amount, ins bdi").text.replace("درهم","").replace(",","").strip())
-                except: curr = 0
-                try:
-                    orig = float(item.find_element(By.CSS_SELECTOR, "del .amount, del bdi").text.replace("درهم","").replace(",","").strip())
-                except: orig = 0
-                disc = round((orig-curr)/orig*100) if orig>0 and curr>0 else 0
-                products.append({"id":slug,"name":name,"url":link,"curr":curr,"orig":orig,"disc":disc,"top":link in TOP_SELLER_URLS})
-            except:
-                continue
-    finally:
-        driver.quit()
+    page = 1
+    while True:
+        try:
+            r = requests.get(
+                f"https://ahlashop.net/wp-json/wp/v2/product",
+                params={"per_page": 100, "page": page, "_fields": "id,slug,title,link"},
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=15
+            )
+            if r.status_code != 200:
+                break
+            data = r.json()
+            if not data:
+                break
+            for p in data:
+                slug = p.get("slug", "")
+                products.append({
+                    "id": slug,
+                    "name": p.get("title", {}).get("rendered", slug),
+                    "url": p.get("link", f"https://ahlashop.net/{slug}/"),
+                    "curr": 0, "orig": 0, "disc": 0,
+                    "top": slug in TOP_SELLER_IDS
+                })
+            if len(data) < 100:
+                break
+            page += 1
+        except Exception as e:
+            print(f"Error page {page}: {e}")
+            break
+
+    # fallback: sitemap
+    if not products:
+        try:
+            r = requests.get("https://ahlashop.net/wp-sitemap-posts-product-1.xml",
+                           headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+            import re
+            urls = re.findall(r'<loc>(https://ahlashop\.net/[^<]+)</loc>', r.text)
+            for url in urls:
+                slug = url.rstrip("/").split("/")[-1]
+                products.append({
+                    "id": slug, "name": slug.replace("-", " ").title(),
+                    "url": url, "curr": 0, "orig": 0, "disc": 0,
+                    "top": slug in TOP_SELLER_IDS
+                })
+        except Exception as e:
+            print(f"Sitemap error: {e}")
+
     return products
 
 def send(msg):
     requests.post(
         f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-        json={"chat_id":CHAT_ID,"text":msg,"parse_mode":"HTML","disable_web_page_preview":True},
+        json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML", "disable_web_page_preview": True},
         timeout=10
     )
 
@@ -84,21 +86,15 @@ def report(products, new_ids):
     if new:
         L.append(f"✨ <b>Nouveaux ({len(new)})</b>")
         for p in new[:5]:
-            L.append(f"• <a href='{p['url']}'>{p['name'][:50]}</a>\n  💰 {int(p['curr'])} MAD")
+            L.append(f"• <a href='{p['url']}'>{p['name'][:50]}</a>")
         L.append("")
-    top_promo = [p for p in products if p["top"] and p["disc"]>0]
-    if top_promo:
-        L.append("🔥 <b>Top Sellers en promo</b>")
-        for p in top_promo[:5]:
-            L.append(f"• <a href='{p['url']}'>{p['name'][:50]}</a>\n  💰 {int(p['curr'])} MAD  <s>{int(p['orig'])}</s>  (-{p['disc']}%)")
+    top = [p for p in products if p["top"]]
+    if top:
+        L.append(f"🔥 <b>Top Sellers ({len(top)})</b>")
+        for p in top[:5]:
+            L.append(f"• <a href='{p['url']}'>{p['name'][:50]}</a>")
         L.append("")
-    best = sorted([p for p in products if p["disc"]>=30],key=lambda x:x["disc"],reverse=True)
-    if best:
-        L.append("💥 <b>Meilleures promos (≥30%)</b>")
-        for p in best[:5]:
-            L.append(f"• <a href='{p['url']}'>{p['name'][:50]}</a>\n  💰 {int(p['curr'])} MAD  (-{p['disc']}%)")
-        L.append("")
-    L.append(f"📦 Total: {len(products)} produits  |  🏷️ Promos: {len([p for p in products if p['disc']>0])}")
+    L.append(f"📦 Total: {len(products)} produits")
     L.append(f"🔗 <a href='https://ahlashop.net/shop/'>Voir tout le shop</a>")
     return "\n".join(L)
 
