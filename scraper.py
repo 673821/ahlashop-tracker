@@ -11,28 +11,38 @@ from bs4 import BeautifulSoup
 
 TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "7975203420")
-KNOWN_FILE = "known_products.json"
+KNOWN_FILE   = "known_products.json"
+TOP_FILE     = "top_sellers.json"
+MAX_TOP      = 5
+MAX_NEW      = 5
 
 STORES = [
-    {
-        "name": "Ahlashop",
-        "url": "https://ahlashop.net/shop/",
-        "emoji": "🛍️"
-    },
-    # زيد stores أخرين هنا بهاد الشكل:
+    {"name": "Ahlashop", "url": "https://ahlashop.net/shop/", "emoji": "🛍️"},
     # {"name": "Store2", "url": "https://store2.ma/shop/", "emoji": "🏪"},
 ]
 
+# ---- persistence ----
 def load_known():
     if os.path.exists(KNOWN_FILE):
         with open(KNOWN_FILE) as f:
-            return set(json.load(f))
-    return set()
+            return json.load(f)  # {id: {date_added, name, ...}}
+    return {}
 
-def save_known(ids):
+def save_known(data):
     with open(KNOWN_FILE, "w") as f:
-        json.dump(list(ids), f)
+        json.dump(data, f, ensure_ascii=False)
 
+def load_top():
+    if os.path.exists(TOP_FILE):
+        with open(TOP_FILE) as f:
+            return json.load(f)  # lista ديال max 5 products
+    return []
+
+def save_top(data):
+    with open(TOP_FILE, "w") as f:
+        json.dump(data, f, ensure_ascii=False)
+
+# ---- scraping ----
 def get_driver():
     opts = Options()
     opts.add_argument("--headless")
@@ -91,6 +101,7 @@ def scrape_store(driver, store_url):
         page += 1
     return products
 
+# ---- telegram ----
 def send_text(msg):
     requests.post(
         f"https://api.telegram.org/bot{TOKEN}/sendMessage",
@@ -99,50 +110,86 @@ def send_text(msg):
         timeout=10
     )
 
-def send_product(p):
+def send_product(p, label="✨"):
     price_str = f"💰 {int(p['curr'])} MAD" if p.get('curr') else ""
     orig_str  = f"  <s>{int(p['orig'])} MAD</s>  (-{p['disc']}%)" if p.get('disc') else ""
+    date_str  = f"\n📅 Ajouté le {p.get('date_added','')}" if p.get('date_added') else ""
     caption   = (
-        f"✨ <b>{p['name']}</b>\n"
-        f"{price_str}{orig_str}\n"
+        f"{label} <b>{p['name']}</b>\n"
+        f"{price_str}{orig_str}"
+        f"{date_str}\n"
         f"🔗 <a href='{p['url']}'>Voir le produit</a>"
     )
     if p.get("img"):
-        r = requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
-            data={"chat_id": CHAT_ID, "caption": caption, "parse_mode": "HTML"},
-            files={"photo": ("p.jpg", requests.get(p["img"], timeout=10,
-                   headers={"User-Agent":"Mozilla/5.0"}).content, "image/jpeg")},
-            timeout=30
-        )
-        if r.ok:
-            return
+        try:
+            img_data = requests.get(p["img"], timeout=10,
+                                    headers={"User-Agent":"Mozilla/5.0"}).content
+            r = requests.post(
+                f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
+                data={"chat_id": CHAT_ID, "caption": caption, "parse_mode": "HTML"},
+                files={"photo": ("p.jpg", img_data, "image/jpeg")},
+                timeout=30
+            )
+            if r.ok:
+                return
+        except:
+            pass
     send_text(caption)
 
 # ---- main ----
-known = load_known()
-driver = get_driver()
-all_cur_ids = set()
+today     = datetime.now().strftime("%d/%m/%Y")
+known     = load_known()   # {id: product_dict}
+top       = load_top()     # [product_dict, ...]
+driver    = get_driver()
+all_found = {}
 
 try:
     for store in STORES:
-        prods = scrape_store(driver, store["url"])
-        cur_ids  = set(p["id"] for p in prods)
-        all_cur_ids.update(cur_ids)
+        prods    = scrape_store(driver, store["url"])
         new_prods = [p for p in prods if p["id"] not in known]
 
         print(f"{store['name']}: {len(prods)} produits, {len(new_prods)} nouveaux")
 
+        # زيد تاريخ لكل product جديد
+        for p in new_prods:
+            p["date_added"] = today
+            p["store"]      = store["name"]
+
+        # حفظ كل products فـ known
+        for p in prods:
+            if p["id"] not in known:
+                p["date_added"] = today
+                p["store"]      = store["name"]
+            all_found[p["id"]] = known.get(p["id"], {**p, "date_added": today, "store": store["name"]})
+
+        # update top sellers — زيد جدد وحيد أقدم واحد
+        for p in new_prods:
+            p_with_date = {**p, "date_added": today, "store": store["name"]}
+            top.append(p_with_date)
+            if len(top) > MAX_TOP:
+                top.pop(0)  # حيد أقدم واحد
+
+        # بعث رسالة products جدد
         if new_prods:
-            d = datetime.now().strftime("%d/%m/%Y")
+            d = datetime.now().strftime("%d/%m/%Y %H:%M")
             send_text(
                 f"{store['emoji']} <b>{store['name']} — {d}</b>\n"
-                f"✨ {len(new_prods)} nouveaux produits!"
+                f"✨ <b>{len(new_prods)} nouveaux produits détectés!</b>"
             )
-            for p in new_prods[:5]:
-                send_product(p)
+            for p in new_prods[:MAX_NEW]:
+                send_product(p, label="✨")
                 time.sleep(0.8)
+
 finally:
     driver.quit()
 
-save_known(known | all_cur_ids)
+# بعث top sellers
+if top:
+    send_text(f"🔥 <b>Top {MAX_TOP} Sellers Ahlashop</b>\n(Les {MAX_TOP} derniers ajouts)")
+    for p in top:
+        send_product(p, label="🔥")
+        time.sleep(0.8)
+
+# حفظ
+save_known(all_found)
+save_top(top)
