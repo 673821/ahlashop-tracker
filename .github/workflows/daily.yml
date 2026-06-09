@@ -38,8 +38,10 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
-      - name: Save known products cache
+      - name: Save cache
         uses: actions/cache/save@v4
         with:
-          path: known_products.json
-          key: known-products-cache
+          path: |
+            known_products.json
+            top_sellers.json
+          key: ahlashop-cache
