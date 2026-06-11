@@ -18,20 +18,16 @@ MAX_TOP    = 5
 MAX_NEW    = 5
 
 STORES = [
-    {"name": "Ahlashop",   "url": "https://ahlashop.net/shop/",              "platform": "woo",     "emoji": "🛍️"},
-    {"name": "Lumza",      "url": "https://lumza.shop/collections/all",       "platform": "shopify", "emoji": "🏪"},
-    {"name": "Akazashop",  "url": "https://akazashop.store/",                 "platform": "shopify", "emoji": "🏪"},
-    {"name": "Hexa",       "url": "https://hexa.ma/collections/all",          "platform": "shopify", "emoji": "🏪"},
-    {"name": "Vayara",     "url": "https://vayara.youcan.store/products",     "platform": "youcan",  "emoji": "🏪"},
-    {"name": "Werlma",     "url": "https://werlma.youcan.store/products",     "platform": "youcan",  "emoji": "🏪"},
-    {"name": "Jemadour",   "url": "https://jemadour.com/collections/all",     "platform": "shopify", "emoji": "🏪"},
-    {"name": "Narami",     "url": "https://narami.shop/",                     "platform": "shopify", "emoji": "🏪"},
-    {"name": "Vidah",      "url": "https://vidah.ma/",                        "platform": "shopify", "emoji": "🏪"},
-    {"name": "Evashoping", "url": "https://evashoping.online/",               "platform": "shopify", "emoji": "🏪"},
-    {"name": "Perfecta",   "url": "https://www.perfecta.love/",               "platform": "shopify", "emoji": "🏪"},
-    {"name": "Zenova",     "url": "https://zenova.beauty/",                   "platform": "shopify", "emoji": "🏪"},
-    {"name": "Chridaba",   "url": "https://chridaba.store/",                  "platform": "shopify", "emoji": "🏪"},
-    {"name": "Rizal",      "url": "https://rizalshop.com/collections/all",    "platform": "shopify", "emoji": "🏪"},
+    {"name": "Ahlashop",  "url": "https://ahlashop.net/shop/",              "platform": "woo",     "emoji": "🛍️"},
+    {"name": "Lumza",     "url": "https://lumza.shop/collections/all",       "platform": "shopify", "emoji": "🏪"},
+    {"name": "Hexa",      "url": "https://hexa.ma/collections/all",          "platform": "shopify", "emoji": "🏪"},
+    {"name": "Vayara",    "url": "https://vayara.youcan.store/collections",  "platform": "youcan",  "emoji": "🏪"},
+    {"name": "Werlma",    "url": "https://werlma.youcan.store/collections",  "platform": "youcan",  "emoji": "🏪"},
+    {"name": "Jemadour",  "url": "https://jemadour.com/collections/all",     "platform": "shopify", "emoji": "🏪"},
+    {"name": "Narami",    "url": "https://narami.shop/collections/all",      "platform": "shopify", "emoji": "🏪"},
+    {"name": "Vidah",     "url": "https://vidah.ma/collections/all",         "platform": "shopify", "emoji": "🏪"},
+    {"name": "Perfecta",  "url": "https://www.perfecta.love/collections/all","platform": "shopify", "emoji": "🏪"},
+    {"name": "Zenova",    "url": "https://zenova.beauty/collections",        "platform": "shopify", "emoji": "🏪"},
 ]
 
 def load_known():
