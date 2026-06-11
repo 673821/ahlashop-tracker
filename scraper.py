@@ -9,23 +9,40 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 
-TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "7975203420")
-KNOWN_FILE   = "known_products.json"
-TOP_FILE     = "top_sellers.json"
-MAX_TOP      = 5
-MAX_NEW      = 5
+TOKEN      = os.environ.get("TELEGRAM_TOKEN", "")
+CHAT_ID    = os.environ.get("TELEGRAM_CHAT_ID", "7975203420")
+KNOWN_FILE = "known_products.json"
+TOP_FILE   = "top_sellers.json"
+MAX_TOP    = 5
+MAX_NEW    = 5
 
 STORES = [
-    {"name": "Ahlashop", "url": "https://ahlashop.net/shop/", "emoji": "🛍️"},
-    # {"name": "Store2", "url": "https://store2.ma/shop/", "emoji": "🏪"},
+    {"name": "Ahlashop",   "url": "https://ahlashop.net/",        "emoji": "🛍️"},
+    {"name": "Lumza",      "url": "https://lumza.shop/",           "emoji": "🏪"},
+    {"name": "Akazashop",  "url": "https://akazashop.store/",      "emoji": "🏪"},
+    {"name": "Hexa",       "url": "https://hexa.ma/",              "emoji": "🏪"},
+    {"name": "Vayara",     "url": "https://vayara.youcan.store/",  "emoji": "🏪"},
+    {"name": "Werlma",     "url": "https://werlma.youcan.store/",  "emoji": "🏪"},
+    {"name": "Jemadour",   "url": "https://jemadour.com/",         "emoji": "🏪"},
+    {"name": "Narami",     "url": "https://narami.shop/",          "emoji": "🏪"},
+    {"name": "Vidah",      "url": "https://vidah.ma/",             "emoji": "🏪"},
+    {"name": "Evashoping", "url": "https://evashoping.online/",    "emoji": "🏪"},
+    {"name": "Perfecta",   "url": "https://www.perfecta.love/",    "emoji": "🏪"},
+    {"name": "Zenova",     "url": "https://zenova.beauty/",        "emoji": "🏪"},
+    {"name": "Chridaba",   "url": "https://chridaba.store/",       "emoji": "🏪"},
+    {"name": "Rizal",      "url": "https://rizalshop.com/",        "emoji": "🏪"},
 ]
+
+SHOP_PATHS = ["/shop/", "/products/", "/boutique/", "/catalogue/", "/store/", ""]
 
 # ---- persistence ----
 def load_known():
     if os.path.exists(KNOWN_FILE):
         with open(KNOWN_FILE) as f:
-            return json.load(f)  # {id: {date_added, name, ...}}
+            data = json.load(f)
+            if isinstance(data, list):
+                return {}
+            return data
     return {}
 
 def save_known(data):
@@ -35,14 +52,14 @@ def save_known(data):
 def load_top():
     if os.path.exists(TOP_FILE):
         with open(TOP_FILE) as f:
-            return json.load(f)  # lista ديال max 5 products
+            return json.load(f)
     return []
 
 def save_top(data):
     with open(TOP_FILE, "w") as f:
         json.dump(data, f, ensure_ascii=False)
 
-# ---- scraping ----
+# ---- driver ----
 def get_driver():
     opts = Options()
     opts.add_argument("--headless")
@@ -53,14 +70,38 @@ def get_driver():
         service=Service(ChromeDriverManager().install()), options=opts
     )
 
-def scrape_store(driver, store_url):
+# ---- detect shop page ----
+def find_shop_url(driver, base_url):
+    for path in SHOP_PATHS:
+        url = base_url.rstrip("/") + path
+        try:
+            driver.get(url)
+            WebDriverWait(driver, 8).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "li.product, .product-item, .product_item, [class*='product']"))
+            )
+            soup = BeautifulSoup(driver.page_source, "lxml")
+            items = soup.select("li.product, .product-item, .product_item")
+            if items:
+                print(f"  Found shop at: {url} ({len(items)} items)")
+                return url, "woocommerce"
+            # youcan
+            yc_items = soup.select("[data-product-id], .yc-product, .product-card")
+            if yc_items:
+                print(f"  Found YouCan shop at: {url} ({len(yc_items)} items)")
+                return url, "youcan"
+        except:
+            continue
+    return None, None
+
+# ---- scraping woocommerce ----
+def scrape_woo(driver, shop_url):
     products = []
     page = 1
     while True:
-        url = f"{store_url}page/{page}/" if page > 1 else store_url
+        url = f"{shop_url.rstrip('/')}/" if page == 1 else f"{shop_url.rstrip('/')}/page/{page}/"
         driver.get(url)
         try:
-            WebDriverWait(driver, 12).until(
+            WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "li.product"))
             )
         except:
@@ -72,31 +113,75 @@ def scrape_store(driver, store_url):
             break
         for item in items:
             try:
-                name_el = item.select_one("div.eael-product-title, h2")
+                name_el = item.select_one("div.eael-product-title, h2, .woocommerce-loop-product__title")
                 link_el = item.select_one("a.woocommerce-LoopProduct-link, a")
                 img_el  = item.select_one("img")
                 name = name_el.text.strip() if name_el else ""
                 link = link_el.get("href","") if link_el else ""
                 slug = link.rstrip("/").split("/")[-1]
-                img  = ""
-                if img_el:
-                    img = img_el.get("src") or img_el.get("data-src","")
+                img  = (img_el.get("src") or img_el.get("data-src","")) if img_el else ""
                 amounts = item.select("span.woocommerce-Price-amount")
                 curr, orig = 0, 0
                 if len(amounts) >= 2:
-                    orig = float(amounts[0].text.replace("درهم","").replace(",","").strip() or 0)
-                    curr = float(amounts[1].text.replace("درهم","").replace(",","").strip() or 0)
+                    orig = float(amounts[0].text.replace("درهم","").replace("MAD","").replace(",","").strip() or 0)
+                    curr = float(amounts[1].text.replace("درهم","").replace("MAD","").replace(",","").strip() or 0)
                 elif len(amounts) == 1:
-                    curr = float(amounts[0].text.replace("درهم","").replace(",","").strip() or 0)
+                    curr = float(amounts[0].text.replace("درهم","").replace("MAD","").replace(",","").strip() or 0)
                 disc = round((orig-curr)/orig*100) if orig>0 and curr>0 else 0
                 if name and slug:
-                    products.append({
-                        "id": slug, "name": name, "url": link,
-                        "img": img, "curr": curr, "orig": orig, "disc": disc
-                    })
+                    products.append({"id": slug, "name": name, "url": link,
+                                     "img": img, "curr": curr, "orig": orig, "disc": disc})
             except:
                 continue
         if not soup.select_one("a.next.page-numbers"):
+            break
+        page += 1
+    return products
+
+# ---- scraping youcan ----
+def scrape_youcan(driver, shop_url):
+    products = []
+    page = 1
+    while True:
+        url = f"{shop_url.rstrip('/')}{'?page='+str(page) if page > 1 else ''}"
+        driver.get(url)
+        try:
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "[data-product-id], .product-card, .yc-product"))
+            )
+        except:
+            break
+        time.sleep(2)
+        soup = BeautifulSoup(driver.page_source, "lxml")
+        items = soup.select("[data-product-id], .product-card")
+        if not items:
+            break
+        for item in items:
+            try:
+                name_el = item.select_one("h2, h3, .product-name, .product-title, [class*='name'], [class*='title']")
+                link_el = item.select_one("a")
+                img_el  = item.select_one("img")
+                price_el = item.select_one("[class*='price'], .price")
+                name = name_el.text.strip() if name_el else ""
+                link = link_el.get("href","") if link_el else ""
+                if link and not link.startswith("http"):
+                    from urllib.parse import urljoin
+                    link = urljoin(shop_url, link)
+                slug = link.rstrip("/").split("/")[-1]
+                img  = (img_el.get("src") or img_el.get("data-src","")) if img_el else ""
+                curr = 0
+                if price_el:
+                    import re
+                    nums = re.findall(r'[\d,.]+', price_el.text)
+                    if nums:
+                        curr = float(nums[0].replace(",",""))
+                if name and slug:
+                    products.append({"id": slug, "name": name, "url": link,
+                                     "img": img, "curr": curr, "orig": 0, "disc": 0})
+            except:
+                continue
+        # check next page
+        if not soup.select_one("a[rel='next'], .pagination .next, a.next"):
             break
         page += 1
     return products
@@ -113,11 +198,12 @@ def send_text(msg):
 def send_product(p, label="✨"):
     price_str = f"💰 {int(p['curr'])} MAD" if p.get('curr') else ""
     orig_str  = f"  <s>{int(p['orig'])} MAD</s>  (-{p['disc']}%)" if p.get('disc') else ""
-    date_str  = f"\n📅 Ajouté le {p.get('date_added','')}" if p.get('date_added') else ""
+    date_str  = f"\n📅 {p.get('date_added','')}" if p.get('date_added') else ""
+    store_str = f" | {p.get('store','')}" if p.get('store') else ""
     caption   = (
         f"{label} <b>{p['name']}</b>\n"
         f"{price_str}{orig_str}"
-        f"{date_str}\n"
+        f"{date_str}{store_str}\n"
         f"🔗 <a href='{p['url']}'>Voir le produit</a>"
     )
     if p.get("img"):
@@ -137,44 +223,50 @@ def send_product(p, label="✨"):
     send_text(caption)
 
 # ---- main ----
-today     = datetime.now().strftime("%d/%m/%Y")
-known     = load_known()   # {id: product_dict}
-top       = load_top()     # [product_dict, ...]
-driver    = get_driver()
-all_found = {}
+today    = datetime.now().strftime("%d/%m/%Y")
+known    = load_known()
+top      = load_top()
+driver   = get_driver()
+all_found = dict(known)
 
 try:
     for store in STORES:
-        prods    = scrape_store(driver, store["url"])
+        print(f"\n--- {store['name']} ---")
+        shop_url, platform = find_shop_url(driver, store["url"])
+
+        if not shop_url:
+            print(f"  No shop page found for {store['name']}")
+            continue
+
+        if platform == "youcan":
+            prods = scrape_youcan(driver, shop_url)
+        else:
+            prods = scrape_woo(driver, shop_url)
+
         new_prods = [p for p in prods if p["id"] not in known]
+        print(f"  {len(prods)} produits, {len(new_prods)} nouveaux")
 
-        print(f"{store['name']}: {len(prods)} produits, {len(new_prods)} nouveaux")
-
-        # زيد تاريخ لكل product جديد
         for p in new_prods:
             p["date_added"] = today
             p["store"]      = store["name"]
 
-        # حفظ كل products فـ known
         for p in prods:
-            if p["id"] not in known:
-                p["date_added"] = today
-                p["store"]      = store["name"]
-            all_found[p["id"]] = known.get(p["id"], {**p, "date_added": today, "store": store["name"]})
+            pid = f"{store['name']}_{p['id']}"
+            if pid not in all_found:
+                all_found[pid] = {**p, "date_added": today, "store": store["name"]}
 
-        # update top sellers — زيد جدد وحيد أقدم واحد
+        # update top sellers
         for p in new_prods:
-            p_with_date = {**p, "date_added": today, "store": store["name"]}
-            top.append(p_with_date)
+            top.append({**p, "date_added": today, "store": store["name"]})
             if len(top) > MAX_TOP:
-                top.pop(0)  # حيد أقدم واحد
+                top.pop(0)
 
-        # بعث رسالة products جدد
+        # bعث products جدد
         if new_prods:
             d = datetime.now().strftime("%d/%m/%Y %H:%M")
             send_text(
                 f"{store['emoji']} <b>{store['name']} — {d}</b>\n"
-                f"✨ <b>{len(new_prods)} nouveaux produits détectés!</b>"
+                f"✨ <b>{len(new_prods)} nouveaux produits!</b>"
             )
             for p in new_prods[:MAX_NEW]:
                 send_product(p, label="✨")
@@ -185,11 +277,10 @@ finally:
 
 # بعث top sellers
 if top:
-    send_text(f"🔥 <b>Top {MAX_TOP} Sellers Ahlashop</b>\n(Les {MAX_TOP} derniers ajouts)")
+    send_text(f"🔥 <b>Top {MAX_TOP} derniers ajouts (tous stores)</b>")
     for p in top:
         send_product(p, label="🔥")
         time.sleep(0.8)
 
-# حفظ
 save_known(all_found)
 save_top(top)
