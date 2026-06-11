@@ -18,23 +18,22 @@ MAX_TOP    = 5
 MAX_NEW    = 5
 
 STORES = [
-    {"name": "Ahlashop",   "url": "https://ahlashop.net/shop/",             "platform": "woo",      "emoji": "🛍️"},
-    {"name": "Lumza",      "url": "https://lumza.shop/collections/all",      "platform": "shopify",  "emoji": "🏪"},
-    {"name": "Akazashop",  "url": "https://akazashop.store/collections/all", "platform": "shopify",  "emoji": "🏪"},
-    {"name": "Hexa",       "url": "https://hexa.ma/collections/all",         "platform": "shopify",  "emoji": "🏪"},
-    {"name": "Vayara",     "url": "https://vayara.youcan.store/products",    "platform": "youcan",   "emoji": "🏪"},
-    {"name": "Werlma",     "url": "https://werlma.youcan.store/products",    "platform": "youcan",   "emoji": "🏪"},
-    {"name": "Jemadour",   "url": "https://jemadour.com/collections/all",    "platform": "shopify",  "emoji": "🏪"},
-    {"name": "Narami",     "url": "https://narami.shop/collections/all",     "platform": "shopify",  "emoji": "🏪"},
-    {"name": "Vidah",      "url": "https://vidah.ma/collections/all",        "platform": "shopify",  "emoji": "🏪"},
-    {"name": "Evashoping", "url": "https://evashoping.online/collections/all","platform": "shopify", "emoji": "🏪"},
-    {"name": "Perfecta",   "url": "https://www.perfecta.love/collections/all","platform": "shopify", "emoji": "🏪"},
-    {"name": "Zenova",     "url": "https://zenova.beauty/collections/all",   "platform": "shopify",  "emoji": "🏪"},
-    {"name": "Chridaba",   "url": "https://chridaba.store/collections/all",  "platform": "shopify",  "emoji": "🏪"},
-    {"name": "Rizal",      "url": "https://rizalshop.com/collections/all",   "platform": "shopify",  "emoji": "🏪"},
+    {"name": "Ahlashop",   "url": "https://ahlashop.net/shop/",              "platform": "woo",     "emoji": "🛍️"},
+    {"name": "Lumza",      "url": "https://lumza.shop/collections/all",       "platform": "shopify", "emoji": "🏪"},
+    {"name": "Akazashop",  "url": "https://akazashop.store/",                 "platform": "shopify", "emoji": "🏪"},
+    {"name": "Hexa",       "url": "https://hexa.ma/collections/all",          "platform": "shopify", "emoji": "🏪"},
+    {"name": "Vayara",     "url": "https://vayara.youcan.store/products",     "platform": "youcan",  "emoji": "🏪"},
+    {"name": "Werlma",     "url": "https://werlma.youcan.store/products",     "platform": "youcan",  "emoji": "🏪"},
+    {"name": "Jemadour",   "url": "https://jemadour.com/collections/all",     "platform": "shopify", "emoji": "🏪"},
+    {"name": "Narami",     "url": "https://narami.shop/",                     "platform": "shopify", "emoji": "🏪"},
+    {"name": "Vidah",      "url": "https://vidah.ma/",                        "platform": "shopify", "emoji": "🏪"},
+    {"name": "Evashoping", "url": "https://evashoping.online/",               "platform": "shopify", "emoji": "🏪"},
+    {"name": "Perfecta",   "url": "https://www.perfecta.love/",               "platform": "shopify", "emoji": "🏪"},
+    {"name": "Zenova",     "url": "https://zenova.beauty/",                   "platform": "shopify", "emoji": "🏪"},
+    {"name": "Chridaba",   "url": "https://chridaba.store/",                  "platform": "shopify", "emoji": "🏪"},
+    {"name": "Rizal",      "url": "https://rizalshop.com/collections/all",    "platform": "shopify", "emoji": "🏪"},
 ]
 
-# ---- persistence ----
 def load_known():
     if os.path.exists(KNOWN_FILE):
         with open(KNOWN_FILE) as f:
@@ -56,7 +55,6 @@ def save_top(data):
     with open(TOP_FILE, "w") as f:
         json.dump(data, f, ensure_ascii=False)
 
-# ---- driver ----
 def get_driver():
     opts = Options()
     opts.add_argument("--headless")
@@ -67,7 +65,6 @@ def get_driver():
         service=Service(ChromeDriverManager().install()), options=opts
     )
 
-# ---- scrape woocommerce ----
 def scrape_woo(driver, shop_url):
     products = []
     page = 1
@@ -112,16 +109,16 @@ def scrape_woo(driver, shop_url):
         page += 1
     return products
 
-# ---- scrape shopify ----
 def scrape_shopify(driver, shop_url):
     products = []
     page = 1
+    base = "/".join(shop_url.split("/")[:3])
     while True:
         url = f"{shop_url}?page={page}" if page > 1 else shop_url
         driver.get(url)
         try:
             WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "li.grid__item"))
+                EC.presence_of_element_located((By.CSS_SELECTOR, "li.grid__item, .product-item, article.product"))
             )
         except:
             break
@@ -129,20 +126,21 @@ def scrape_shopify(driver, shop_url):
         soup = BeautifulSoup(driver.page_source, "lxml")
         items = soup.select("li.grid__item")
         if not items:
+            items = soup.select(".product-item, article.product")
+        if not items:
             break
         for item in items:
             try:
-                name_el  = item.select_one("h3.card__heading a, h2.card__heading a, .card__heading a")
+                name_el  = item.select_one("h3.card__heading a, h2.card__heading a, .card__heading a, .product-item__title a, h2 a, h3 a")
                 img_el   = item.select_one("img")
-                price_el = item.select_one("span.price-item--regular, span.price-item--sale, .price-item")
                 sale_el  = item.select_one("span.price-item--sale")
-                reg_el   = item.select_one("s.price-item--regular, .price__compare s")
+                reg_el   = item.select_one("s.price-item--regular, .price__compare s, s.price-item")
+                price_el = item.select_one("span.price-item--regular, span.price-item, .price-item")
                 if not name_el:
                     continue
                 name = name_el.text.strip()
                 link = name_el.get("href","")
                 if link and not link.startswith("http"):
-                    base = "/".join(shop_url.split("/")[:3])
                     link = base + link
                 slug = link.rstrip("/").split("/")[-1]
                 img  = (img_el.get("src") or img_el.get("data-src","")) if img_el else ""
@@ -157,7 +155,6 @@ def scrape_shopify(driver, shop_url):
                                      "img": img, "curr": curr, "orig": orig, "disc": disc})
             except:
                 continue
-        # check next page
         if not soup.select_one("a[href*='page='], .pagination__next, a.next"):
             break
         page += 1
@@ -165,7 +162,6 @@ def scrape_shopify(driver, shop_url):
             break
     return products
 
-# ---- scrape youcan ----
 def scrape_youcan(driver, shop_url):
     products = []
     page = 1
@@ -174,7 +170,7 @@ def scrape_youcan(driver, shop_url):
         driver.get(url)
         try:
             WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "[data-product-id], .product-card, .yc-product, .product"))
+                EC.presence_of_element_located((By.CSS_SELECTOR, "[data-product-id], .product-card, .yc-product"))
             )
         except:
             break
@@ -199,7 +195,7 @@ def scrape_youcan(driver, shop_url):
                 img  = (img_el.get("src") or img_el.get("data-src","")) if img_el else ""
                 curr = 0
                 if price_el:
-                    nums = re.findall(r'[\d]+', price_el.text.replace(",",""))
+                    nums = re.findall(r'\d+', price_el.text.replace(",",""))
                     if nums:
                         curr = float(nums[0])
                 if name and slug:
@@ -212,7 +208,6 @@ def scrape_youcan(driver, shop_url):
         page += 1
     return products
 
-# ---- telegram ----
 def send_text(msg):
     requests.post(
         f"https://api.telegram.org/bot{TOKEN}/sendMessage",
